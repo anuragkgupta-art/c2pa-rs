@@ -1,0 +1,53 @@
+name: Build c2patool for Hostinger v3
+
+on:
+  push:
+    branches:
+      - build/c2patool-hostinger
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout workflow repository
+        uses: actions/checkout@v4
+
+      - name: Build c2patool in pinned Debian Bullseye snapshot
+        shell: bash
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/work" \
+            -w /work \
+            debian:11 \
+            bash -euxo pipefail -c '
+              # Use one immutable Debian Bullseye snapshot so all packages
+              # come from a consistent repository state.
+              printf "%s\n" "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20241201T000000Z bullseye main" > /etc/apt/sources.list
+              apt-get -o Acquire::Check-Valid-Until=false update
+              apt-get install -y --no-install-recommends ca-certificates curl build-essential pkg-config libssl-dev git
+              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh
+              sh /tmp/rustup.sh -y --default-toolchain stable
+              . /root/.cargo/env
+              git clone --depth 1 --branch c2patool-v0.27.22 https://github.com/contentauth/c2pa-rs.git /tmp/c2pa-rs
+              cd /tmp/c2pa-rs/cli
+              cargo build --release
+              cp target/release/c2patool /work/c2patool-linux-glibc234-v3
+              chmod 755 /work/c2patool-linux-glibc234-v3
+              file /work/c2patool-linux-glibc234-v3
+              ldd /work/c2patool-linux-glibc234-v3 | head -30
+            '
+
+      - name: Verify executable
+        run: |
+          ./c2patool-linux-glibc234-v3 --version
+          sha256sum ./c2patool-linux-glibc234-v3 | tee c2patool-linux-glibc234-v3.sha256
+
+      - name: Upload c2patool artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: c2patool-linux-glibc234-v3
+          path: |
+            c2patool-linux-glibc234-v3
+            c2patool-linux-glibc234-v3.sha256
+          retention-days: 7
