@@ -1,0 +1,48 @@
+name: Build c2patool for Hostinger v4
+
+on:
+  push:
+    branches:
+      - build/c2patool-hostinger
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout workflow repository
+        uses: actions/checkout@v4
+
+      - name: Build static c2patool with Alpine musl
+        shell: bash
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/work" \
+            -w /work \
+            rust:1.98-alpine3.22 \
+            sh -euxo pipefail -c '
+              apk add --no-cache build-base pkgconf git ca-certificates
+              git clone --depth 1 --branch c2patool-v0.27.22 https://github.com/contentauth/c2pa-rs.git /tmp/c2pa-rs
+              cd /tmp/c2pa-rs/cli
+              sed -i "s/\"openssl\",/\"rust_native_crypto\",/" Cargo.toml
+              cargo build --release --target x86_64-unknown-linux-musl
+              cp /tmp/c2pa-rs/target/x86_64-unknown-linux-musl/release/c2patool /work/c2patool-linux-musl-v4
+              chmod 755 /work/c2patool-linux-musl-v4
+              file /work/c2patool-linux-musl-v4
+              /work/c2patool-linux-musl-v4 --version
+            '
+
+      - name: Verify executable
+        run: |
+          file ./c2patool-linux-musl-v4
+          ./c2patool-linux-musl-v4 --version
+          sha256sum ./c2patool-linux-musl-v4 | tee c2patool-linux-musl-v4.sha256
+
+      - name: Upload c2patool artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: c2patool-linux-musl-v4
+          path: |
+            c2patool-linux-musl-v4
+            c2patool-linux-musl-v4.sha256
+          retention-days: 7
