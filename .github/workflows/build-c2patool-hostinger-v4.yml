@@ -9,26 +9,42 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+
     steps:
       - name: Checkout workflow repository
         uses: actions/checkout@v4
 
-      - name: Build static c2patool with Alpine musl
+      - name: Build c2patool as static musl binary
         shell: bash
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/work" \
             -w /work \
-            rust:1.98-alpine3.22 \
+            rust:1.98.1-alpine3.24 \
             sh -euxo pipefail -c '
-              apk add --no-cache build-base pkgconf git ca-certificates
-              git clone --depth 1 --branch c2patool-v0.27.22 https://github.com/contentauth/c2pa-rs.git /tmp/c2pa-rs
-              cd /tmp/c2pa-rs/cli
-              sed -i "s/\"openssl\",/\"rust_native_crypto\",/" Cargo.toml
-              cargo build --release --target x86_64-unknown-linux-musl
-              cp /tmp/c2pa-rs/target/x86_64-unknown-linux-musl/release/c2patool /work/c2patool-linux-musl-v4
+              apk add --no-cache \
+                build-base \
+                musl-dev \
+                perl \
+                cmake \
+                pkgconf \
+                binutils \
+                git \
+                ca-certificates
+
+              cargo install --locked \
+                --root /work/out \
+                --git https://github.com/contentauth/c2pa-rs \
+                --tag c2patool-v0.27.22 \
+                c2patool
+
+              strip -o /work/c2patool-linux-musl-v4 \
+                /work/out/bin/c2patool
+
               chmod 755 /work/c2patool-linux-musl-v4
+
               file /work/c2patool-linux-musl-v4
+
               /work/c2patool-linux-musl-v4 --version
             '
 
