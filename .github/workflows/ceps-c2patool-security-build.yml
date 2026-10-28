@@ -30,7 +30,7 @@ jobs:
           cargo update -p rustls --precise 0.23.46
           cargo update -p tokio --precise 1.53.3
           cargo update -p webpki-roots --precise 1.0.10
-          cargo metadata --locked --offline --format-version 1 > cargo-metadata.json
+          cargo metadata --locked --format-version 1 > cargo-metadata.json
           grep -A2 -E '^name = "(rustls|tokio|webpki-roots)"$' Cargo.lock
 
       - name: Build c2patool for musl
