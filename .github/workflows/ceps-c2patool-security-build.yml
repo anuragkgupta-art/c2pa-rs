@@ -10,22 +10,20 @@ permissions:
   contents: read
 
 jobs:
-  build-linux-musl:
-    name: Build and verify Linux x86_64 musl binary
+  build-linux:
+    name: Build and verify Linux x86_64 binary
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout exact branch source
         uses: actions/checkout@v4
 
-      - name: Install Rust stable with musl target
+      - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-musl
 
       - name: Install native build prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential musl-tools pkg-config ca-certificates file binutils
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config ca-certificates file binutils libssl-dev
 
       - name: Update only the three reviewed dependencies
         run: |
@@ -35,32 +33,32 @@ jobs:
           cargo metadata --locked --format-version 1 > cargo-metadata.json
           grep -A2 -E '^name = "(rustls|tokio|webpki-roots)"$' Cargo.lock
 
-      - name: Build c2patool for musl
+      - name: Build c2patool for native Linux
         env:
           CARGO_BUILD_JOBS: 2
           CARGO_INCREMENTAL: 0
-        run: cargo build --locked --release --target x86_64-unknown-linux-musl -p c2patool
+        run: cargo build --locked --release -p c2patool
 
       - name: Verify executable and capture checksums
         run: |
-          install -D -m 0755 target/x86_64-unknown-linux-musl/release/c2patool dist/c2patool-linux-x86_64-musl
-          ./dist/c2patool-linux-x86_64-musl --version
-          file ./dist/c2patool-linux-x86_64-musl
-          sha256sum ./dist/c2patool-linux-x86_64-musl | tee dist/SHA256SUMS
+          install -D -m 0755 target/release/c2patool dist/c2patool-linux-x86_64
+          ./dist/c2patool-linux-x86_64 --version
+          file ./dist/c2patool-linux-x86_64
+          sha256sum ./dist/c2patool-linux-x86_64 | tee dist/SHA256SUMS
           cp Cargo.lock dist/Cargo.lock
           cp cargo-metadata.json dist/cargo-metadata.json
-          cargo tree --locked --target x86_64-unknown-linux-musl > dist/cargo-dependency-tree.txt
+          cargo tree --locked > dist/cargo-dependency-tree.txt
 
       - name: Generate CycloneDX SBOM
         continue-on-error: true
         run: |
           cargo install cargo-sbom --version 0.9.1 --locked
-          cargo sbom --target x86_64-unknown-linux-musl > dist/c2patool-sbom.json
+          cargo sbom > dist/c2patool-sbom.json
 
       - name: Upload build artifact only (no release or deployment)
         uses: actions/upload-artifact@v4
         with:
-          name: ceps-c2patool-0.27.22-linux-x86_64-musl
+          name: ceps-c2patool-0.27.22-linux-x86_64
           path: dist/
           if-no-files-found: error
           retention-days: 14
