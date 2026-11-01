@@ -44,7 +44,10 @@ jobs:
             almalinux:9 \
             bash -lc '
               set -euo pipefail
-              dnf -y install gcc gcc-c++ make perl-core curl ca-certificates tar gzip git binutils file
+              # AlmaLinux 9 images ship curl-minimal, which provides the curl CLI.
+              # Installing the full curl package conflicts with curl-minimal.
+              dnf -y install gcc gcc-c++ make perl-core ca-certificates tar gzip git binutils file
+              command -v curl
               echo "=== Build environment ==="
               cat /etc/os-release
               getconf GNU_LIBC_VERSION
