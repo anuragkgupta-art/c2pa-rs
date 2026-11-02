@@ -47,6 +47,7 @@ jobs:
               # AlmaLinux 9 images ship curl-minimal, which provides the curl CLI.
               # Installing the full curl package conflicts with curl-minimal.
               dnf -y install gcc gcc-c++ make perl-core ca-certificates tar gzip git binutils file
+              # curl-minimal already supplies curl; do not install conflicting curl package.
               command -v curl
               echo "=== Build environment ==="
               cat /etc/os-release
