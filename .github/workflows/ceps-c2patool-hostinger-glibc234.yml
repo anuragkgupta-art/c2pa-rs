@@ -1,0 +1,127 @@
+name: CEPS c2patool Hostinger GLIBC 2.34 build
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - security/c2patool-0.27.22-dependency-build
+    paths:
+      - "cli/**"
+      - "sdk/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/ceps-c2patool-hostinger-glibc234.yml"
+  push:
+    branches:
+      - ceps-hostinger-glibc234-build-20261101
+    paths:
+      - "cli/**"
+      - "sdk/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/ceps-c2patool-hostinger-glibc234.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build on AlmaLinux 9 (glibc 2.34)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build in GLIBC 2.34 container
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -w /work \
+            almalinux:9 \
+            bash -lc '
+              set -euo pipefail
+              # AlmaLinux 9 images ship curl-minimal, which provides the curl CLI.
+              # Installing the full curl package conflicts with curl-minimal.
+              dnf -y install gcc gcc-c++ make perl-core ca-certificates tar gzip git binutils file
+              # curl-minimal already supplies curl; do not install conflicting curl package.
+              command -v curl
+              echo "=== Build environment ==="
+              cat /etc/os-release
+              getconf GNU_LIBC_VERSION
+              gcc --version | head -1
+
+              echo "=== Install pinned Rust toolchain ==="
+              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh
+              sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain 1.98.1
+              source "$HOME/.cargo/env"
+              rustc --version
+              cargo --version
+
+              echo "=== Resolve and verify TLS/crypto dependencies ==="
+              cargo tree -p c2patool > /tmp/ceps-cargo-tree.txt
+              if grep -E "openssl(-sys)? v|native-tls v|hyper-tls v|tokio-native-tls v" /tmp/ceps-cargo-tree.txt; then
+                echo "ERROR: OpenSSL/native-tls dependency remains."
+                exit 1
+              fi
+              grep -E "rustls v|hyper-rustls v|tokio-rustls v" /tmp/ceps-cargo-tree.txt | sort -u
+              cargo tree --locked -p c2patool > /tmp/ceps-cargo-tree-locked.txt
+
+              echo "=== Release build ==="
+              export CARGO_BUILD_JOBS=2
+              export CARGO_INCREMENTAL=0
+              export RAYON_NUM_THREADS=1
+              export CARGO_TARGET_DIR=/tmp/ceps-cargo-target
+              cargo build --release --locked -p c2patool --bin c2patool
+
+              BIN=/tmp/ceps-cargo-target/release/c2patool
+              test -x "$BIN"
+              echo "=== Binary identity ==="
+              file "$BIN"
+              "$BIN" --version
+              echo "=== Dynamic dependencies ==="
+              ldd "$BIN" | tee /tmp/ceps-ldd.txt
+              if grep -E "libssl|libcrypto|not found" /tmp/ceps-ldd.txt; then
+                echo "ERROR: unexpected OpenSSL or unresolved runtime dependency."
+                exit 1
+              fi
+
+              echo "=== Maximum required GLIBC symbol ==="
+              MAX_GLIBC=$(readelf --version-info "$BIN" | grep -oE "GLIBC_[0-9]+\\.[0-9]+" | sort -Vu | tail -1)
+              echo "$MAX_GLIBC"
+              if [ -z "$MAX_GLIBC" ]; then
+                echo "ERROR: could not determine GLIBC symbol requirement."
+                exit 1
+              fi
+              if [ "$(printf "%s\\n" GLIBC_2.34 "$MAX_GLIBC" | sort -V | tail -1)" != "GLIBC_2.34" ]; then
+                echo "ERROR: binary requires newer than GLIBC 2.34."
+                exit 1
+              fi
+
+              mkdir -p /work/dist
+              cp "$BIN" /work/dist/c2patool
+              cp Cargo.lock /work/dist/Cargo.lock.resolved
+              cp /tmp/ceps-cargo-tree-locked.txt /work/dist/dependency-tree.txt
+              cp /tmp/ceps-ldd.txt /work/dist/runtime-dependencies.txt
+              {
+                echo "Build image: almalinux:9"
+                getconf GNU_LIBC_VERSION
+                gcc --version | head -1
+                rustc --version
+                cargo --version
+                "$BIN" --version
+                echo "Maximum required GLIBC symbol: $MAX_GLIBC"
+                sha256sum /work/dist/c2patool
+              } > /work/dist/build-report.txt
+            '
+
+      - name: Upload candidate and evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ceps-c2patool-glibc234-candidate
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
